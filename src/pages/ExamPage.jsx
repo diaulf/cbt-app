@@ -127,6 +127,7 @@ export default function ExamPage() {
         .single()
 
       localStorage.removeItem(localKey)
+      localStorage.removeItem('cbt_active_attempt')
       setSubmitting(false)
 
       if (resultError || !result) {

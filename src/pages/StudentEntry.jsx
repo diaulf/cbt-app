@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 import { pickRandomQuestions, shuffleArray, shuffleOptions } from '../utils/shuffle'
+
+const ACTIVE_ATTEMPT_KEY = 'cbt_active_attempt'
 
 export default function StudentEntry() {
   const [name, setName] = useState('')
@@ -9,7 +11,53 @@ export default function StudentEntry() {
   const [accessCode, setAccessCode] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [checkingResume, setCheckingResume] = useState(true)
   const navigate = useNavigate()
+
+  // Cek apakah device ini masih punya ujian yang sedang berlangsung
+  // (misal karena aplikasi/browser sempat reload di tengah ujian).
+  // Kalau ada dan waktunya belum habis, langsung lempar ke halaman ujian
+  // tanpa siswa perlu isi ulang nama/kelas/kode dari awal.
+  useEffect(() => {
+    async function checkResume() {
+      const raw = localStorage.getItem(ACTIVE_ATTEMPT_KEY)
+      if (!raw) {
+        setCheckingResume(false)
+        return
+      }
+
+      try {
+        const { attemptId } = JSON.parse(raw)
+        const { data: attempt } = await supabase
+          .from('attempts')
+          .select('id, status, started_at, time_limit_seconds')
+          .eq('id', attemptId)
+          .maybeSingle()
+
+        if (!attempt || attempt.status !== 'in_progress') {
+          localStorage.removeItem(ACTIVE_ATTEMPT_KEY)
+          setCheckingResume(false)
+          return
+        }
+
+        const elapsedSec = Math.floor((Date.now() - new Date(attempt.started_at).getTime()) / 1000)
+        const remaining = attempt.time_limit_seconds - elapsedSec
+
+        if (remaining <= 0) {
+          // Waktu sudah habis, biarkan halaman ujian yang menangani auto-submit
+          navigate(`/ujian/${attempt.id}`, { replace: true })
+          return
+        }
+
+        navigate(`/ujian/${attempt.id}`, { replace: true })
+      } catch {
+        localStorage.removeItem(ACTIVE_ATTEMPT_KEY)
+        setCheckingResume(false)
+      }
+    }
+
+    checkResume()
+  }, [navigate])
 
   async function handleStart(e) {
     e.preventDefault()
@@ -143,7 +191,16 @@ export default function StudentEntry() {
       return
     }
 
+    localStorage.setItem(ACTIVE_ATTEMPT_KEY, JSON.stringify({ attemptId: attempt.id }))
     navigate(`/ujian/${attempt.id}`)
+  }
+
+  if (checkingResume) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-slate-500">
+        Memeriksa sesi ujian...
+      </div>
+    )
   }
 
   return (
